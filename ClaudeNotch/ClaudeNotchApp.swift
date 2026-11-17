@@ -144,8 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum HookSettings {
     /// The hook script lives in the repo; the settings use $HOME so they stay portable.
-    static let scriptPath = NSHomeDirectory() + "/claude-notch-app/hooks/notch-hook.sh"
-    static let command = "\"$HOME/claude-notch-app/hooks/notch-hook.sh\""
+    static let scriptPath = NSHomeDirectory() + "/Documents/claude-notch-app/hooks/notch-hook.sh"
+    static let command = "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\""
 
     static var json: String {
         func entry(_ event: String, timeout: Int) -> String {

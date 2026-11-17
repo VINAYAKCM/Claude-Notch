@@ -27,7 +27,7 @@ from the hook, and listens for app-activation and Space changes.
 Needs Xcode 16+ and macOS 14+.
 
 ```bash
-cd ~/claude-notch-app
+cd ~/Documents/claude-notch-app
 xcodebuild -project ClaudeNotch.xcodeproj -scheme ClaudeNotch -configuration Release -derivedDataPath build/dd build
 open build/dd/Build/Products/Release/ClaudeNotch.app
 ```
@@ -54,25 +54,25 @@ already have one):
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" UserPromptSubmit", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" UserPromptSubmit", "timeout": 5 } ] }
     ],
     "PreToolUse": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" PreToolUse", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" PreToolUse", "timeout": 5 } ] }
     ],
     "PostToolUse": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" PostToolUse", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" PostToolUse", "timeout": 5 } ] }
     ],
     "PermissionRequest": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" PermissionRequest", "timeout": 40 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" PermissionRequest", "timeout": 40 } ] }
     ],
     "Notification": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" Notification", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" Notification", "timeout": 5 } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" Stop", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" Stop", "timeout": 5 } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "\"$HOME/claude-notch-app/hooks/notch-hook.sh\" SessionEnd", "timeout": 5 } ] }
+      { "hooks": [ { "type": "command", "command": "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\" SessionEnd", "timeout": 5 } ] }
     ]
   }
 }
@@ -153,7 +153,7 @@ ClaudeNotch/
   SparkGlyph.swift       the 8-ray spark and its per-activity motion
   TextViews.swift        streamed text, path truncation, glide, rolling digits
   DemoRun.swift          scripted run for the menu's "Play Demo Run"
-hooks/notch-hook.sh      the Claude Code hook
+hooks/notch-hook.sh      the Claude Code hook (path is referenced from ~/.claude/settings.json)
 ```
 
 ## Known limits (v1)
