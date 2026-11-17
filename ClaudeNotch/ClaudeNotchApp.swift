@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var controller: NotchController!
     private var panel: NotchPanel!
     private let server = SocketServer()
-    private var statusItem: NSStatusItem!
+    private var menu: NSMenu!
     private var monitors: [Any] = []
     private var serverError: String?
     private var demo: DemoRun?
@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel = NotchPanel()
         let host = NotchHostingView(rootView: NotchView(c: controller, model: model))
         host.onMouse = { [weak self] p in self?.controller.pointerMoved(p) }
+        host.onRightClick = { [weak self] e in self?.showMenu(rightClick: e) }
         panel.contentView = host
         panel.place(controller.metrics)
         panel.orderFrontRegardless()
@@ -75,17 +76,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         do { try server.start() } catch { serverError = "\(error)"; NSLog("ClaudeNotch: socket failed: \(error)") }
 
-        setupStatusItem()
+        buildMenu()
     }
 
     func applicationWillTerminate(_ note: Notification) { server.stop() }
 
     // MARK: - Menu bar item
 
-    private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Claude Notch")
-        let menu = NSMenu()
+    // MARK: - Menu (no menu-bar icon)
+    //
+    // There's deliberately no icon in the menu bar. The menu opens when you
+    // right-click the notch while it's showing, or open Claude Notch again
+    // (Spotlight, Launchpad or /Applications) while it's already running.
+
+    private func buildMenu() {
+        menu = NSMenu()
         let title = NSMenuItem(title: serverError == nil ? "Claude Notch · listening" : "Claude Notch · socket error", action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
@@ -99,7 +104,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Quit Claude Notch", #selector(quit), "q"))
         menu.delegate = self
-        statusItem.menu = menu
+    }
+
+    /// Opening the app again while it's running shows its menu, just under the notch.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMenu(rightClick: nil)
+        return false
+    }
+
+    private func showMenu(rightClick: NSEvent?) {
+        if let e = rightClick, let view = panel.contentView {
+            NSMenu.popUpContextMenu(menu, with: e, for: view)
+            return
+        }
+        let m = controller.metrics
+        let width = max(menu.size.width, 220)
+        NSApp.activate()
+        menu.popUp(positioning: nil, at: NSPoint(x: m.centerX - width / 2, y: m.top - m.height - 6), in: nil)
     }
 
     func menuWillOpen(_ menu: NSMenu) {

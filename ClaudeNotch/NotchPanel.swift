@@ -37,6 +37,7 @@ final class NotchPanel: NSPanel {
 /// pointer movement over the window, even when another app is active.
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
     var onMouse: ((NSPoint) -> Void)?
+    var onRightClick: ((NSEvent) -> Void)?
     private var area: NSTrackingArea?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -48,6 +49,8 @@ final class NotchHostingView<Content: View>: NSHostingView<Content> {
         addTrackingArea(a)
         area = a
     }
+
+    override func rightMouseDown(with event: NSEvent) { onRightClick?(event) }
 
     override func mouseMoved(with event: NSEvent) { super.mouseMoved(with: event); onMouse?(NSEvent.mouseLocation) }
     override func mouseEntered(with event: NSEvent) { super.mouseEntered(with: event); onMouse?(NSEvent.mouseLocation) }

@@ -33,13 +33,16 @@ Needs Xcode 16+ and macOS 14+.
 
 This builds a Release copy, puts it in `/Applications`, and opens it. The first launch
 from `/Applications` turns on **Start at Login** (System Settings → General → Login Items;
-toggle it from the ✦ menu). Run the script again after pulling changes.
+toggle it from the app's menu). Run the script again after pulling changes.
 
 For development, open `ClaudeNotch.xcodeproj` and press ⌘R. Debug builds never register
 as a login item, and have extra test commands on the socket that Release builds leave out.
 
-The ✦ menu: **Play Demo Run** shows every state without Claude Code; **Copy Hooks
-Settings JSON** copies the block below; **Start at Login** toggles the login item.
+There's no menu-bar icon. To open the app's menu, either **right-click the notch** while
+it's showing, or **open Claude Notch again** (Spotlight, Launchpad or `/Applications`)
+while it's running; the menu appears just under the notch. It has **Play Demo Run**
+(every state, no Claude Code needed), **Copy Hooks Settings JSON**, **Start at Login**
+and **Quit**.
 
 ## Hook setup
 
