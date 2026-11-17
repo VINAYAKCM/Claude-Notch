@@ -9,6 +9,8 @@ enum GlyphMode: Equatable { case think, read, search, edit, run, commit, wait, d
 /// One thing Claude is doing right now, as the notch shows it.
 struct Step: Equatable {
     var id = UUID()
+    /// Claude's id for the tool call this step shows, so results land on the right step.
+    var toolUseID: String? = nil
     var verb: String
     var detail: String = ""
     var kind: DetailKind = .text
@@ -63,10 +65,10 @@ enum ToolInfo {
             return Step(verb: "Planning", detail: d, kind: .text, mode: .think)
         default:
             if tool.hasPrefix("mcp__") {
-                let parts = tool.split(separator: "_", omittingEmptySubsequences: true)
-                let rest = parts.dropFirst()   // drop "mcp"
-                let server = rest.first.map(String.init) ?? "MCP"
-                let name = rest.dropFirst().joined(separator: "_")
+                // mcp__<server>__<tool>
+                let parts = tool.components(separatedBy: "__")
+                let server = parts.count > 1 ? parts[1] : "MCP"
+                let name = parts.count > 2 ? parts[2...].joined(separator: "__").replacingOccurrences(of: "_", with: " ") : ""
                 return Step(verb: "Using", detail: name.isEmpty ? server : "\(server) · \(name)", kind: .text, mode: .run)
             }
             return Step(verb: tool, detail: "", kind: .text, mode: .run)

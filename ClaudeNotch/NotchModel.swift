@@ -104,7 +104,9 @@ final class NotchModel: ObservableObject {
             let input = (e["tool_input"] as? [String: Any]) ?? [:]
             s.stepCount += 1
             if s.status != .permission { s.status = .running }
-            setStep(s, ToolInfo.describe(tool: tool, input: input, cwd: s.cwd))
+            var step = ToolInfo.describe(tool: tool, input: input, cwd: s.cwd)
+            step.toolUseID = e["tool_use_id"] as? String
+            setStep(s, step)
 
         case "PostToolUse":
             let tool = (e["tool_name"] as? String) ?? "Tool"
@@ -114,7 +116,9 @@ final class NotchModel: ObservableObject {
             s.history.append(HistoryItem(text: r.past))
             if s.history.count > 3 { s.history.removeFirst(s.history.count - 3) }
             if s.status == .waiting || s.status == .permission { s.status = .running }
-            finishStep(s, r)
+            // Tools can run in parallel: only roll the count on the step it belongs to.
+            let useID = e["tool_use_id"] as? String
+            if useID == nil || s.step.toolUseID == nil || useID == s.step.toolUseID { finishStep(s, r) }
 
         case "PermissionRequest":
             askPermission(s, e, reply: reply)
