@@ -259,6 +259,7 @@ struct OpenPanel: View {
 
     private var footText: String {
         let n = s.stepCount
+        if s.yourTurn { return "Waiting for your answer" }
         if s.status == .done, let t0 = s.startedAt, let t1 = s.endedAt {
             return "\(n) step\(n == 1 ? "" : "s") · \(formatLong(t1.timeIntervalSince(t0)))"
         }
@@ -324,8 +325,39 @@ struct QuestionRow: View {
         .padding(.leading, 8)
         .padding(.trailing, 9)
         .padding(.bottom, 6)
+        .overlay(alignment: .bottom) {
+            if let pending {
+                Countdown(deadline: pending.deadline, total: NotchModel.permissionTimeout, active: active)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 4)
+                    .id(pending.id)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Claude wants to run \(label) \(detail)")
+    }
+}
+
+/// A hairline that drains over the permission timeout, so you can see when the
+/// question will hand back to the terminal. It fades in once you're past halfway.
+struct Countdown: View {
+    let deadline: Date
+    let total: TimeInterval
+    let active: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active)) { ctx in
+            let left = clamp01(deadline.timeIntervalSince(ctx.date) / total)
+            GeometryReader { geo in
+                Capsule()
+                    .fill(Theme.amber)
+                    .frame(width: geo.size.width * left, height: 1.5)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .frame(height: 1.5)
+            .opacity(0.25 + 0.45 * (1 - left))
+        }
+        .accessibilityLabel("Hands back to the terminal in \(Int(max(0, deadline.timeIntervalSinceNow))) seconds")
     }
 }
 

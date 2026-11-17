@@ -128,6 +128,25 @@ enum ToolInfo {
 
     // MARK: helpers
 
+    /// If a reply ends with a question, return that question (its last sentence).
+    static func trailingQuestion(_ message: String) -> String? {
+        var t = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Ignore trailing markdown and quotes: **Should I?**, "…?"
+        while let last = t.last, "*_`)\"'”’".contains(last) { t.removeLast() }
+        guard t.hasSuffix("?") else { return nil }
+        var line = t.components(separatedBy: "\n").last ?? t
+        line = line.trimmingCharacters(in: .whitespaces)
+        while let f = line.first, "-*>#_ ".contains(f) { line.removeFirst() }
+        // Keep only the last sentence of that line.
+        let body = line.dropLast()
+        if let r = body.range(of: #"[.!?:]\s"#, options: [.regularExpression, .backwards]) {
+            line = String(line[r.upperBound...])
+        }
+        line = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        let q = oneLine(line)
+        return q.count < 2 ? nil : truncate(q, 160)
+    }
+
     static func displayPath(_ p: String, cwd: String) -> String {
         if !cwd.isEmpty, p.hasPrefix(cwd + "/") { return String(p.dropFirst(cwd.count + 1)) }
         let home = NSHomeDirectory()

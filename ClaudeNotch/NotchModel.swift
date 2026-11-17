@@ -8,6 +8,8 @@ struct PendingPermission {
     let id = UUID()
     let label: String
     let detail: String
+    /// When the notch gives up and hands the question back to the terminal.
+    let deadline: Date
     let reply: (String) -> Void
 }
 
@@ -29,6 +31,12 @@ final class Session {
     /// A finished step lingers briefly so its result can be read before the next one replaces it.
     var dwellUntil = Date.distantPast
     var queued: Step?
+    /// Tools that have started but not finished. While any run, the session never times out.
+    var toolsRunning = 0
+    /// Folded away after a long silence; the next event resumes the same run.
+    var asleep = false
+    /// Claude finished by asking you something: stays as "Your turn" until you answer.
+    var yourTurn = false
 
     init(id: String) { self.id = id }
 }
@@ -53,8 +61,11 @@ final class NotchModel: ObservableObject {
     static let permissionTimeout: TimeInterval = 25
 
     private var staleTimer: Timer?
-    /// A run that hears nothing for this long (Claude crashed, terminal closed) folds away.
-    static let staleAfter: TimeInterval = 15 * 60
+    /// A run that hears nothing for this long, with no tool still running
+    /// (Claude crashed, terminal closed), folds away. Any later event resumes it.
+    static let staleAfter: TimeInterval = 60 * 60
+    /// Even a "running" tool gets this long, in case Claude crashed mid-tool.
+    static let hardStaleAfter: TimeInterval = 6 * 60 * 60
 
     init(focus: FocusWatcher) {
         self.focus = focus
@@ -66,8 +77,11 @@ final class NotchModel: ObservableObject {
     private func sweepStale() {
         var any = false
         for s in sessions.values where s.pending == nil && s.status != .idle && s.status != .done
-            && Date().timeIntervalSince(s.lastUpdate) > Self.staleAfter {
-            s.status = .idle; any = true
+            && Date().timeIntervalSince(s.lastUpdate) > (s.toolsRunning == 0 ? Self.staleAfter : Self.hardStaleAfter) {
+            s.status = .idle
+            s.asleep = !s.yourTurn
+            s.yourTurn = false
+            any = true
         }
         if let s = current, s.status == .idle { currentID = sessions.values.filter { $0.status != .idle }.max { $0.lastUpdate < $1.lastUpdate }?.id }
         if any { changed() }
@@ -99,7 +113,8 @@ final class NotchModel: ObservableObject {
             begin(s, prompt: (e["prompt"] as? String) ?? "")
 
         case "PreToolUse":
-            if s.status == .idle || s.status == .done { begin(s, prompt: s.prompt) }
+            wakeOrBegin(s)
+            s.toolsRunning += 1
             let tool = (e["tool_name"] as? String) ?? "Tool"
             let input = (e["tool_input"] as? [String: Any]) ?? [:]
             s.stepCount += 1
@@ -108,17 +123,26 @@ final class NotchModel: ObservableObject {
             step.toolUseID = e["tool_use_id"] as? String
             setStep(s, step)
 
-        case "PostToolUse":
+        case "PostToolUse", "PostToolUseFailure":
+            s.toolsRunning = max(0, s.toolsRunning - 1)
+            if s.asleep { wake(s) }
+            guard s.status != .idle && s.status != .done else { break }
             let tool = (e["tool_name"] as? String) ?? "Tool"
             let input = (e["tool_input"] as? [String: Any]) ?? [:]
-            let r = ToolInfo.result(tool: tool, input: input, response: e["tool_response"],
+            var r = ToolInfo.result(tool: tool, input: input, response: e["tool_response"],
                                     durationMs: (e["duration_ms"] as? Double) ?? (e["duration_ms"] as? Int).map(Double.init), cwd: s.cwd)
+            if name == "PostToolUseFailure" {
+                let what = ToolInfo.describe(tool: tool, input: input, cwd: s.cwd)
+                r = ToolInfo.Result(count: nil, metaText: "failed",
+                                    past: "\(tool) failed" + (what.detail.isEmpty ? "" : " · " + ToolInfo.truncate(what.detail, 40)))
+            }
             s.history.append(HistoryItem(text: r.past))
             if s.history.count > 3 { s.history.removeFirst(s.history.count - 3) }
             if s.status == .waiting || s.status == .permission { s.status = .running }
             // Tools can run in parallel: only roll the count on the step it belongs to.
             let useID = e["tool_use_id"] as? String
-            if useID == nil || s.step.toolUseID == nil || useID == s.step.toolUseID { finishStep(s, r) }
+            let matches = useID != nil ? useID == s.step.toolUseID : (s.step.toolUseID == nil && s.step.mode != .think)
+            if matches { finishStep(s, r) }
 
         case "PermissionRequest":
             askPermission(s, e, reply: reply)
@@ -137,7 +161,7 @@ final class NotchModel: ObservableObject {
             }
 
         case "Stop":
-            finish(s)
+            finish(s, lastMessage: e["last_assistant_message"] as? String)
 
         case "SessionEnd":
             resolvePending(s, decision: nil)
@@ -154,8 +178,27 @@ final class NotchModel: ObservableObject {
         reply?("")
     }
 
+    /// A tool event with no prompt in front of it: pick the run back up if it
+    /// fell asleep, otherwise start a fresh one.
+    private func wakeOrBegin(_ s: Session) {
+        if s.asleep { wake(s) }
+        else if s.status == .idle || s.status == .done || s.yourTurn { begin(s, prompt: s.prompt) }
+    }
+
+    /// Resume a run that folded away after a long silence: same timer, same history.
+    private func wake(_ s: Session) {
+        s.asleep = false
+        s.status = .running
+        s.step = .thinking()
+        hideWork?.cancel(); showDone = false; pendingHide = false
+        currentID = s.id
+    }
+
     private func begin(_ s: Session, prompt: String) {
         resolvePending(s, decision: nil)
+        s.asleep = false
+        s.yourTurn = false
+        s.toolsRunning = 0
         s.prompt = prompt
         s.startedAt = Date()
         s.endedAt = nil
@@ -206,10 +249,25 @@ final class NotchModel: ObservableObject {
         }
     }
 
-    private func finish(_ s: Session) {
+    private func finish(_ s: Session, lastMessage: String?) {
         resolvePending(s, decision: nil)
         thinkWork?.cancel()
         s.queued = nil
+        s.toolsRunning = 0
+        s.asleep = false
+
+        // Claude ended by asking you something: it's waiting on you, not done.
+        if let q = lastMessage.flatMap(ToolInfo.trailingQuestion) {
+            s.endedAt = Date()
+            s.yourTurn = true
+            s.status = .waiting
+            s.step = Step(verb: "Your turn", detail: q, kind: .text, mode: .wait, tone: .wait)
+            currentID = s.id
+            hideWork?.cancel(); showDone = false; pendingHide = false
+            if hostIsFrontmost(s) { s.status = .idle; s.yourTurn = false }
+            return
+        }
+        s.yourTurn = false
         s.status = .done
         s.endedAt = Date()
         let took = s.startedAt.map { Date().timeIntervalSince($0) } ?? 0
@@ -249,7 +307,8 @@ final class NotchModel: ObservableObject {
         let tool = (e["tool_name"] as? String) ?? "Tool"
         let input = (e["tool_input"] as? [String: Any]) ?? [:]
         let sum = ToolInfo.permissionSummary(tool: tool, input: input, cwd: s.cwd)
-        let p = PendingPermission(label: sum.label, detail: sum.detail, reply: reply)
+        let p = PendingPermission(label: sum.label, detail: sum.detail,
+                                  deadline: Date().addingTimeInterval(Self.permissionTimeout), reply: reply)
         s.pending = p
         s.status = .permission
         var st = s.step
@@ -302,6 +361,11 @@ final class NotchModel: ObservableObject {
             s.status = .running
             var st = s.step; st.tone = .normal; s.step = st
         }
+        // You've gone back to Claude's terminal, so you've seen its question.
+        for s in sessions.values where s.yourTurn && hostIsFrontmost(s) {
+            s.yourTurn = false
+            s.status = .idle
+        }
         if let s = current, s.status == .done, showDone, hostIsFrontmost(s) {
             hideWork?.cancel()
             showDone = false
@@ -309,6 +373,15 @@ final class NotchModel: ObservableObject {
         }
         changed()
     }
+
+    #if DEBUG
+    /// Pretend the current run went silent for an hour.
+    func debugSleepCurrent() {
+        guard let s = current else { return }
+        s.lastUpdate = Date().addingTimeInterval(-Self.hardStaleAfter - 1)
+        sweepStale()
+    }
+    #endif
 
     func activateHost() {
         guard let pid = current?.hostPID, let app = NSRunningApplication(processIdentifier: pid) else { return }

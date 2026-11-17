@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -10,7 +11,7 @@ struct ClaudeNotchApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var focus: FocusWatcher!
     private var model: NotchModel!
     private var controller: NotchController!
@@ -20,8 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [Any] = []
     private var serverError: String?
     private var demo: DemoRun?
+    private var loginItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        HookSettings.installScript()
+        LoginItem.setUpOnFirstInstalledLaunch()
         focus = FocusWatcher()
         model = NotchModel(focus: focus)
         controller = NotchController(model: model)
@@ -90,8 +94,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Copy Hooks Settings JSON", #selector(copyHooks), "c"))
         menu.addItem(item("Reveal Hook Script", #selector(revealHook), ""))
         menu.addItem(.separator())
+        loginItem = item("Start at Login", #selector(toggleLogin), "")
+        menu.addItem(loginItem)
+        menu.addItem(.separator())
         menu.addItem(item("Quit Claude Notch", #selector(quit), "q"))
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        loginItem.state = LoginItem.isOn ? .on : .off
+        loginItem.title = LoginItem.needsApproval ? "Start at Login (approve in System Settings)" : "Start at Login"
+    }
+
+    @objc private func toggleLogin() {
+        LoginItem.set(!LoginItem.isOn)
     }
 
     private func item(_ title: String, _ sel: Selector, _ key: String) -> NSMenuItem {
@@ -133,9 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "/debug/demo": playDemo(); respond("ok")
         case "/debug/allow": model.answer(allow: true); respond("ok")
         case "/debug/deny": model.answer(allow: false); respond("ok")
+        case "/debug/sleep": model.debugSleepCurrent(); respond("ok")
         case "/debug/state":
             let s = model.current
-            respond("ui=\(controller.ui) w=\(Int(controller.w)) h=\(Int(controller.h)) status=\(String(describing: s?.status)) verb=\(s?.step.verb ?? "-") detail=\(s?.step.detail ?? "-") count=\(String(describing: s?.step.count)) host=\(s?.hostName ?? "-") metrics=\(controller.metrics)")
+            respond("ui=\(controller.ui) start=\(s?.startedAt.map { Int($0.timeIntervalSince1970) } ?? 0) steps=\(s?.stepCount ?? 0) hist=\(s?.history.map(\.text) ?? []) running=\(s?.toolsRunning ?? 0) w=\(Int(controller.w)) h=\(Int(controller.h)) status=\(String(describing: s?.status)) verb=\(s?.step.verb ?? "-") detail=\(s?.step.detail ?? "-") count=\(String(describing: s?.step.count)) host=\(s?.hostName ?? "-") metrics=\(controller.metrics)")
         default: respond("?")
         }
     }
@@ -143,20 +161,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum HookSettings {
-    /// The hook script lives in the repo; the settings use $HOME so they stay portable.
-    static let scriptPath = NSHomeDirectory() + "/Documents/claude-notch-app/hooks/notch-hook.sh"
-    static let command = "\"$HOME/Documents/claude-notch-app/hooks/notch-hook.sh\""
+    /// The app copies its bundled hook script here on every launch. Claude Code's
+    /// settings point at this path, so moving or deleting the repo can't break them.
+    static let scriptPath = NSHomeDirectory() + "/Library/Application Support/ClaudeNotch/notch-hook.sh"
+    static let command = "\"$HOME/Library/Application Support/ClaudeNotch/notch-hook.sh\""
+
+    static let events: [(String, Int)] = [
+        ("UserPromptSubmit", 5), ("PreToolUse", 5), ("PostToolUse", 5), ("PostToolUseFailure", 5),
+        ("PermissionRequest", 40), ("Notification", 5), ("Stop", 5), ("SessionEnd", 5),
+    ]
 
     static var json: String {
-        func entry(_ event: String, timeout: Int) -> String {
-            """
-                "\(event)": [
-                  { "hooks": [ { "type": "command", "command": "\(command.replacingOccurrences(of: "\"", with: "\\\"")) \(event)", "timeout": \(timeout) } ] }
-                ]
-            """
+        var hooks: [String: Any] = [:]
+        for (event, timeout) in events {
+            hooks[event] = [["hooks": [["type": "command", "command": "\(command) \(event)", "timeout": timeout]]]]
         }
-        let events = [("UserPromptSubmit", 5), ("PreToolUse", 5), ("PostToolUse", 5),
-                      ("PermissionRequest", 40), ("Notification", 5), ("Stop", 5), ("SessionEnd", 5)]
-        return "{\n  \"hooks\": {\n" + events.map { entry($0.0, timeout: $0.1) }.joined(separator: ",\n") + "\n  }\n}\n"
+        let data = try? JSONSerialization.data(withJSONObject: ["hooks": hooks],
+                                               options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
+    /// Copy the bundled script into place if it's missing or out of date.
+    /// Written to a temp file and renamed, so a hook running right now never reads half a file.
+    static func installScript() {
+        guard let src = Bundle.main.url(forResource: "notch-hook", withExtension: "sh"),
+              let data = try? Data(contentsOf: src) else { NSLog("ClaudeNotch: hook script missing from bundle"); return }
+        let dst = URL(fileURLWithPath: scriptPath)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
+        if (try? Data(contentsOf: dst)) == data, fm.isExecutableFile(atPath: dst.path) { return }
+        let tmp = dst.deletingLastPathComponent().appendingPathComponent(".notch-hook.\(getpid()).tmp")
+        do {
+            try data.write(to: tmp)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tmp.path)
+            if rename(tmp.path, dst.path) != 0 { throw POSIXError(.EIO) }
+        } catch {
+            try? fm.removeItem(at: tmp)
+            NSLog("ClaudeNotch: couldn't install hook script: \(error)")
+        }
+    }
+}
+
+/// Start at Login, via the system's Login Items (System Settings → General → Login Items).
+@MainActor
+enum LoginItem {
+    static var isOn: Bool { SMAppService.mainApp.status == .enabled }
+    static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
+
+    static func set(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            NSLog("ClaudeNotch: login item \(on ? "register" : "unregister") failed: \(error)")
+        }
+        if on && needsApproval { SMAppService.openSystemSettingsLoginItems() }
+    }
+
+    /// Turn it on once, the first time the installed copy (in /Applications) runs.
+    /// Builds run from Xcode never register themselves.
+    static func setUpOnFirstInstalledLaunch() {
+        let key = "didSetUpLoginItem"
+        guard Bundle.main.bundlePath.hasPrefix("/Applications/"),
+              !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        set(true)
     }
 }
