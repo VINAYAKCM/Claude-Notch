@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build a Release copy of Claude Notch and install it to /Applications.
-# The first launch from /Applications turns on Start at Login (toggle it in the ✦ menu).
+# The first launch from /Applications turns on Start at Login (toggle it from the app's menu: right-click the notch).
 set -e
 cd "$(dirname "$0")/.."
 xcodebuild -project ClaudeNotch.xcodeproj -scheme ClaudeNotch -configuration Release \

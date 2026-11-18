@@ -1,67 +1,61 @@
 # Claude Notch
 
-A tiny macOS menu-bar app that turns the MacBook notch into a live activity for
-[Claude Code](https://code.claude.com). While Claude works in a terminal you're not
-looking at, the notch shows what it's doing. Hover to peek, click to open, and answer
-permission prompts (Allow / Deny) without switching back.
+Your MacBook's notch, but it tells you what Claude is up to.
 
-Native port of the web prototype in `Crafts/crafts/claude-notch`.
+You ask Claude Code to do something, then you wander off to Figma or Slack or wherever.
+Normally you'd keep flipping back to check on it. With Claude Notch, the notch quietly
+grows a little and shows you what's happening: what it's reading, what it's running,
+how long it's been going. If Claude needs your permission, you can tap **Allow** or
+**Deny** right there, no tab-switching.
 
-## States
+When you go back to Claude, it gets out of your way and hides again.
+
+- Works with **Claude Code** wherever you run it: Terminal, iTerm, Ghostty, VS Code,
+  or the Code tab in the Claude desktop app.
+- Doesn't work with regular Claude chats. It runs off Claude Code's hooks, and plain chats
+  don't have any.
+- Everything stays on your Mac. No network, no accounts, no analytics.
+
+## What it looks like
 
 | State | When | What you see |
 |---|---|---|
-| **Idle** | Nothing running, or you're already looking at Claude's terminal | Hidden in the hardware |
-| **Compact** | Claude is working elsewhere | Menu-bar height. Left wing: spark + elapsed time. Right wing: the current verb. Width hugs the content, symmetric around the camera |
-| **Peek** | Hover ~110ms | One live line: verb, detail (paths middle-truncated, keeping the filename; long commands glide once), rolling count |
-| **Open** | Click | Prompt, full current step, progress, last 3 steps, "Open Terminal" |
-| **Question** | Claude needs permission | One row: the command + Deny / Allow |
-| **Your turn** | Claude's reply ends with a question | Amber "Your turn" + the question. Stays until you answer or go back to Claude's terminal |
-| **Done** | Claude finishes the prompt | A check draws in, then it folds away after ~3.6s |
+| **Hidden** | Nothing's running, or you're already looking at Claude | Just your normal notch |
+| **Compact** | Claude is working and you're somewhere else | A slim strip the height of the menu bar. Spark and timer on the left, what it's doing on the right |
+| **Peek** | Hover over it | One live line: the action, the file or command, a rolling count |
+| **Open** | Click it | Your prompt, the current step, progress and the last few steps |
+| **Question** | Claude needs permission | The command plus **Deny** / **Allow** buttons |
+| **Your turn** | Claude ended its reply with a question | Amber "Your turn" until you go answer |
+| **Done** | Claude's finished | A little check mark, then it folds away |
 
-The notch only shows while the app Claude runs in (Terminal, iTerm, Ghostty, VS Code,
-Claude.app…) is **not** frontmost. It finds that app by walking up the process tree
-from the hook, and listens for app-activation and Space changes.
+Want to see it without running anything? Use **Play Demo Run** from the menu (see below).
 
-## Install
+## Getting it running
 
-Needs Xcode 16+ and macOS 14+.
+You'll need a Mac with a notch, macOS 14 or later, and Xcode 16 or later. There's no
+download yet, so you build it yourself. It takes about a minute.
 
 ```bash
-~/Documents/claude-notch-app/scripts/install.sh
+git clone https://github.com/VINAYAKCM/Claude-Notch.git
+cd Claude-Notch
+./scripts/install.sh
 ```
 
-This builds a Release copy, puts it in `/Applications`, and opens it. The first launch
-from `/Applications` turns on **Start at Login** (System Settings → General → Login Items;
-toggle it from the app's menu). Run the script again after pulling changes.
+That builds the app, copies it to `/Applications` and opens it. It also turns on
+**Start at Login** the first time, so it's always around. To pick up changes later,
+pull and run the script again.
 
-For development, open `ClaudeNotch.xcodeproj` and press ⌘R. Debug builds never register
-as a login item, and have extra test commands on the socket that Release builds leave out.
+No notch? It should fall back to a small pill at the top of the screen, but that part hasn't been tested on a real Mac yet.
 
-There's no menu-bar icon. To open the app's menu, either **right-click the notch** while
-it's showing, or **open Claude Notch again** (Spotlight, Launchpad or `/Applications`)
-while it's running; the menu appears just under the notch. It has **Play Demo Run**
-(every state, no Claude Code needed), **Copy Hooks Settings JSON**, **Start at Login**
-and **Quit**.
+### Hook it up to Claude Code
 
-## Hook setup
+Claude Code can run little scripts ("hooks") whenever something happens, like a tool
+starting or a reply finishing. Claude Notch ships with a hook script and copies it to
+`~/Library/Application Support/ClaudeNotch/` each time it launches. Your job is to tell
+Claude Code to use it.
 
-Claude Code runs "hooks" (shell commands) at points in its lifecycle and pipes a JSON
-description of the event to them. The hook script forwards that JSON to the app over a
-Unix socket at `~/Library/Application Support/ClaudeNotch/notch.sock`.
-
-The script's source is `ClaudeNotch/Resources/notch-hook.sh`. On every launch the app
-copies it to `~/Library/Application Support/ClaudeNotch/notch-hook.sh`, and Claude Code's
-settings point there. So moving or deleting this repo never breaks Claude Code; the
-hooks just do nothing until the app runs again.
-
-```
-Claude Code ──(hook JSON on stdin)──▶ notch-hook.sh ──curl --unix-socket──▶ Claude Notch app
-                                            ◀──── Allow / Deny (PermissionRequest only) ────
-```
-
-Add this to `~/.claude/settings.json` (merge it into an existing `"hooks"` block if you
-already have one):
+Add this to `~/.claude/settings.json`. If you already have a `"hooks"` section, merge it
+in. You can also copy this exact block from the app's menu (**Copy Hooks Settings JSON**).
 
 ```json
 {
@@ -94,98 +88,101 @@ already have one):
 }
 ```
 
-Hooks are read when a session starts, so restart any running `claude` sessions after
-adding them. To remove the integration, delete these entries.
+Restart any Claude Code sessions you have open, and you're set.
 
-To try it without touching your global settings, save the block to a file and pass it to
-one session: `claude --settings /path/to/notch-hooks.json`.
+Not ready to commit? Save that block to a file and try it in one session only:
+`claude --settings /path/to/notch-hooks.json`.
 
-### What each hook does
+To get rid of it, delete those entries and quit the app. If the app isn't running, the
+hook just does nothing, so Claude Code never breaks or slows down because of it.
 
-| Hook | Notch |
-|---|---|
-| `UserPromptSubmit` | Starts a run: timer, prompt, spark "thinking" |
-| `PreToolUse` | The verb: Read → **Reading** + path, Bash → **Running** + command (`git commit` → **Committing** + message), Edit → **Editing**, Write → **Writing**, Grep/Glob → **Searching**, WebFetch → **Fetching**, Task → **Delegating**, TodoWrite → **Planning** + the current to-do |
-| `PostToolUse` | The result rolls up (219 lines, 42 additions, 6 files, 1.8s) and joins "recent steps" |
-| `PostToolUseFailure` | A failed tool joins "recent steps" as failed |
-| `PermissionRequest` | The question row. Waits for Allow / Deny |
-| `Notification` | Amber "Needs you" / "Waiting" |
-| `Stop` | Check mark, then folds away; or "Your turn" if Claude ended on a question |
-| `SessionEnd` | Forgets the session |
+### Where's the menu?
 
-### Why `PermissionRequest` and not `PreToolUse` for Allow / Deny
+There's no menu bar icon, on purpose. Nobody needs more stuff up there. To get to the
+menu:
 
-`PreToolUse` fires before *every* tool call, including the ones Claude Code would run
-without asking. Waiting there would stall every file read until you clicked something.
-`PermissionRequest` fires only when Claude Code is about to show you a permission
-prompt, so the notch asks exactly when the terminal would.
+- **Right-click the notch** while it's showing, or
+- **Open Claude Notch again** (Spotlight, Launchpad, `/Applications`) while it's already
+  running. The menu pops up right under the notch.
 
-The fallback is always Claude Code's own prompt:
-- If the app isn't running, the hook exits instantly.
-- If you're already looking at Claude's terminal, the app replies "no decision" at once.
-- If nobody answers in 25 seconds, or you switch to the terminal while it's asking, the
-  app replies "no decision" and Claude Code prompts in the terminal as usual.
+From the menu you can play the demo, copy the hooks JSON, toggle Start at Login, or quit.
 
-While the notch is asking, the terminal shows nothing. A thin amber line under the
-question drains over those 25 seconds, so you can see when it will hand back.
+## A few things worth knowing
 
-### How long it stays up
+**Allow / Deny always has a fallback.** If you don't answer within 25 seconds (a thin
+amber line counts it down), or you switch back to Claude while it's asking, the notch
+steps aside and Claude Code asks you the normal way. If you're already looking at
+Claude, the notch doesn't ask at all.
 
-The notch stays for the whole prompt: from when you send it until Claude finishes (or
-asks you something). Long-running commands are fine; a run only folds away after an hour
-with no events and no tool running (6 hours if a tool never reported back, e.g. Claude
-crashed). Any later event picks the same run back up, timer and history included.
+**It sticks around for the whole run.** From when you send a prompt until Claude
+finishes or asks you something, long commands included. It only gives up on a run after
+an hour of total silence.
 
-### Security
+**It's private.** The app and the hook talk over a local socket file that only your user
+account can open. There's deliberately no `localhost` port, since any website in your
+browser can reach those.
 
-The socket is a file with permissions `0600` in a `0700` folder, and the app checks the
-peer's user ID, so only processes running as you can talk to it. It deliberately isn't a
-localhost port: any web page in your browser can reach `localhost`, and could then
-press "Allow" for you.
+## How it works (the short version)
 
-## How the motion works (if you're curious)
+```
+Claude Code ──(event JSON)──▶ notch-hook.sh ──(local socket)──▶ Claude Notch
+                                    ◀────────── Allow / Deny ──────────
+```
 
-- **Springs, not durations.** The shape's width, height and corner radius each follow a
-  damped spring (`Spring.swift`). Every frame: `force = −k·(value − target) − c·velocity`.
-  Because velocity carries over, changing state mid-animation bends the motion instead
-  of restarting it.
-- **Opening** uses `k=420, c=32` (damping ratio ζ ≈ 0.78, a small bounce), with height
-  on a softer spring so it trails the width by a beat. **Closing** uses `k=680, c=52`
-  (ζ ≈ 1, critically damped: the fastest settle with no overshoot).
-- **The shape** (`NotchShape.swift`) is redrawn from those numbers each frame: concave
-  shoulders where it meets the bezel, straight sides, round bottom corners. Drawing it
-  fresh keeps the corners crisp, where scaling a fixed shape would squash them.
-- **Text** streams in letter by letter (rise 4pt, un-blur, fade over 340ms). The
-  rolling counter changes at most ~9 times a second, so you can read it, and each digit
-  wheel rolls forward over ~300ms.
-- **Reduce Motion** (System Settings → Accessibility → Display) swaps all of it for
-  crossfades and a gently pulsing spark.
+Each hook passes Claude Code's event to the app. The app turns it into something
+readable: `Read` becomes **Reading** plus the file name, `Bash` becomes **Running** plus
+the command, `git commit` becomes **Committing** plus the message, and so on. To know when
+to hide, it works out which app Claude is running in by walking up the process tree, then
+watches which app you're using.
 
-## Files
+## The motion bits (for the curious)
+
+Most of the fun is in how it moves.
+
+- **Springs instead of fixed timings.** Width, height and corner radius each follow their
+  own little physics spring. Interrupt it halfway, by hovering then leaving quickly, and it
+  bends smoothly into the new direction instead of restarting.
+- **Opening has a tiny bounce, closing has none.** It opens with a bit of give, and
+  closes snappy and flat.
+- **The shape is redrawn every frame,** so the curved shoulders where it meets the bezel
+  stay crisp at every size instead of getting squished.
+- **Text types itself in** letter by letter. Long paths get trimmed in the middle so you
+  still see the file name. The counter rolls like an odometer, but slowly enough to
+  read.
+- **Reduce Motion** (System Settings → Accessibility → Display) is respected: everything
+  turns into gentle crossfades.
+
+## What's in here
 
 ```
 ClaudeNotch/
-  ClaudeNotchApp.swift   app entry, menu-bar item, hook-script install, login item
-  NotchPanel.swift       the borderless always-on-top window
-  NotchMetrics.swift     reads the notch size from the screen
-  NotchController.swift  states, springs, hover / click / pin
-  NotchModel.swift       hook events → what to show; permission round-trip
-  ToolInfo.swift         tool name + input → verb, detail, result count
-  SocketServer.swift     HTTP over a Unix socket
-  FocusWatcher.swift     frontmost app, process-tree lookup
-  NotchView.swift        SwiftUI: wings, peek row, open panel, question row
-  SparkGlyph.swift       the 8-ray spark and its per-activity motion
-  TextViews.swift        streamed text, path truncation, glide, rolling digits
-  DemoRun.swift          scripted run for the menu's "Play Demo Run"
-  Resources/notch-hook.sh  the Claude Code hook (installed to Application Support)
-scripts/install.sh       Release build → /Applications
+  ClaudeNotchApp.swift     app setup, the menu, hook install, start at login
+  NotchPanel.swift         the floating window that sits over the notch
+  NotchMetrics.swift       measures the notch on your screen
+  NotchController.swift    states, springs, hover and click
+  NotchModel.swift         turns hook events into what you see; Allow / Deny
+  ToolInfo.swift           tool name → "Reading", "Running", counts
+  SocketServer.swift       the tiny local server
+  FocusWatcher.swift       which app you're looking at
+  NotchView.swift          the SwiftUI views
+  SparkGlyph.swift         the animated spark
+  TextViews.swift          typing text, path trimming, rolling numbers
+  DemoRun.swift            the fake run behind "Play Demo Run"
+  Resources/notch-hook.sh  the hook script
+scripts/install.sh         build and install
 ```
 
-## Known limits (v1)
+## Not perfect yet
 
-- Hooks don't stream token counts, so the counter rolls up when a step *finishes*
-  rather than climbing live, and progress is a travelling glow (the total number of
-  steps isn't known in advance).
-- Several sessions at once: the notch follows whichever one changed most recently.
-- Inside `tmux` / `screen` the process tree doesn't lead back to a terminal app, so the
-  notch can't tell when you're looking at it and shows anyway.
+- Claude Code doesn't share live token counts with hooks, so numbers update when a step
+  finishes rather than ticking up live.
+- If you have several Claude sessions going, the notch follows whichever one did
+  something most recently.
+- Inside `tmux` or `screen` it can't tell which window Claude lives in, so it shows even
+  when you're looking right at it.
+- Only tested on one MacBook so far. If something looks off on yours, open an issue.
+
+## Credits
+
+Built for fun by [Vinayak](https://github.com/VINAYAKCM), with a lot of help from
+Claude. Not affiliated with Anthropic.
